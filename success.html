@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rescue Mesh Portal - Success</title>
+  <link rel="icon" type="image/png" href="Icon.png"/>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <style>
+    body {
+      background: #f4f7fc;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    .success-card {
+      max-width: 700px;
+      margin: 70px auto;
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.12);
+      overflow: hidden;
+      text-align: center;
+    }
+    .top-bar {
+      background: linear-gradient(90deg, #6a11cb, #2575fc);
+      color: white;
+      padding: 22px;
+    }
+    .top-bar h2 {
+      margin: 0;
+      font-weight: 900;
+    }
+    .content-wrap {
+      padding: 30px;
+    }
+    .success-icon {
+      font-size: 70px;
+      color: #198754;
+      margin-bottom: 15px;
+    }
+    .detail-box {
+      background: #f8fbff;
+      border: 1px solid #e6eefc;
+      border-radius: 12px;
+      padding: 18px;
+      text-align: left;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="success-card">
+  <div class="top-bar">
+    <h2>Registration Completed</h2>
+  </div>
+
+  <div class="content-wrap">
+    <div class="success-icon">
+      <i class="bi bi-check-circle-fill"></i>
+    </div>
+
+    <h3 class="text-success">Successfully Registered</h3>
+    <p class="mb-4">The device details have been saved successfully.</p>
+
+    <div class="detail-box">
+      <p><b>Device Key:</b> <span id="showKey">-</span></p>
+      <p><b>Owner Name:</b> <span id="showName">-</span></p>
+      <p><b>Mobile Number:</b> <span id="showMobile">-</span></p>
+    </div>
+
+    <div class="mt-4 d-flex justify-content-center gap-2 flex-wrap">
+      <a href="register.html" class="btn btn-primary">
+        <i class="bi bi-plus-circle me-1"></i>Register Another Device
+      </a>
+      <a href="index.html" class="btn btn-outline-primary">
+        <i class="bi bi-box-arrow-in-right me-1"></i>Go to Login
+      </a>
+    </div>
+  </div>
+</div>
+
+<script>
+  const saved = sessionStorage.getItem("registration_success");
+
+  if (saved) {
+    try {
+      const data = JSON.parse(saved);
+      document.getElementById("showKey").textContent = data.key || "-";
+      document.getElementById("showName").textContent = data.ownerName || "-";
+      document.getElementById("showMobile").textContent = data.mobileNumber || "-";
+    } catch (_) {}
+  }
+</script>
+
+</body>
+</html>
