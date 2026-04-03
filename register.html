@@ -5,9 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/png" href="Icon.png"/>
   <title>Rescue Mesh Portal - Register Device</title>
+
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
   <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <style>
     body {
@@ -87,6 +91,21 @@
     .form-label {
       font-weight: 600;
     }
+
+    #locationMap {
+      width: 100%;
+      height: 320px;
+      border-radius: 12px;
+      border: 1px solid #dbe4f0;
+      overflow: hidden;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.02);
+    }
+
+    .map-help {
+      font-size: 0.9rem;
+      color: #6c757d;
+      margin-top: 8px;
+    }
   </style>
 </head>
 <body>
@@ -142,12 +161,12 @@
 
           <div class="col-md-6">
             <label class="form-label">Address</label>
-            <input type="text" id="address" class="form-control">
+            <input type="text" id="address" class="form-control" placeholder="Will auto-fill from map/location">
           </div>
 
           <div class="col-md-6">
             <label class="form-label">District / Area</label>
-            <input type="text" id="district" class="form-control">
+            <input type="text" id="district" class="form-control" placeholder="Will auto-fill when available">
           </div>
 
           <div class="col-md-6">
@@ -162,12 +181,20 @@
 
           <div class="col-md-6">
             <label class="form-label">Latitude</label>
-            <input type="text" id="homeLatitude" class="form-control">
+            <input type="text" id="homeLatitude" class="form-control" placeholder="Latitude">
           </div>
 
           <div class="col-md-6">
             <label class="form-label">Longitude</label>
-            <input type="text" id="homeLongitude" class="form-control">
+            <input type="text" id="homeLongitude" class="form-control" placeholder="Longitude">
+          </div>
+
+          <div class="col-12">
+            <label class="form-label">Location Preview</label>
+            <div id="locationMap"></div>
+            <div class="map-help">
+              Click on the map to set location, drag the marker to adjust it, or use “Fetch Current Location”.
+            </div>
           </div>
 
           <div class="col-12">
@@ -305,6 +332,11 @@
   const btnRegisterAnother = document.getElementById("btnRegisterAnother");
 
   let qrScanner = null;
+  let map;
+  let marker;
+  let mapInitialized = false;
+  let reverseGeoAbortController = null;
+  let reverseGeoTimeout = null;
 
   function showStatus(message, type = "info") {
     const cls =
@@ -338,6 +370,138 @@
     window.location.href = "index.html";
   });
 
+  function initMap() {
+    map = L.map("locationMap").setView([7.8731, 80.7718], 7);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap"
+    }).addTo(map);
+
+    marker = L.marker([7.8731, 80.7718], {
+      draggable: true
+    }).addTo(map);
+
+    marker.bindPopup("Selected location").openPopup();
+
+    marker.on("dragend", async (e) => {
+      const pos = e.target.getLatLng();
+      setLatLngFields(pos.lat, pos.lng);
+      updateMarkerPopup(pos.lat, pos.lng);
+      await reverseGeocode(pos.lat, pos.lng);
+    });
+
+    map.on("click", async (e) => {
+      const { lat, lng } = e.latlng;
+      setLatLngFields(lat, lng);
+      moveMarker(lat, lng, true);
+      await reverseGeocode(lat, lng);
+      showStatus("Location selected from map.", "success");
+    });
+
+    mapInitialized = true;
+
+    setTimeout(() => {
+      map.invalidateSize();
+    }, 300);
+  }
+
+  function setLatLngFields(lat, lng) {
+    homeLatitude.value = Number(lat).toFixed(6);
+    homeLongitude.value = Number(lng).toFixed(6);
+  }
+
+  function updateMarkerPopup(lat, lng) {
+    marker.bindPopup(
+      `Lat: ${Number(lat).toFixed(6)}<br>Lng: ${Number(lng).toFixed(6)}`
+    ).openPopup();
+  }
+
+  function moveMarker(lat, lng, zoomIn = false) {
+    if (!mapInitialized) return;
+
+    const latitude = Number(lat);
+    const longitude = Number(lng);
+
+    if (isNaN(latitude) || isNaN(longitude)) return;
+
+    marker.setLatLng([latitude, longitude]);
+    updateMarkerPopup(latitude, longitude);
+
+    if (zoomIn) {
+      map.setView([latitude, longitude], 16);
+    } else {
+      map.panTo([latitude, longitude]);
+    }
+  }
+
+  function extractDistrictFromAddress(addressObj) {
+    return (
+      addressObj.city ||
+      addressObj.town ||
+      addressObj.village ||
+      addressObj.suburb ||
+      addressObj.county ||
+      addressObj.state_district ||
+      addressObj.state ||
+      ""
+    );
+  }
+
+  async function reverseGeocode(lat, lng) {
+    try {
+      if (reverseGeoAbortController) {
+        reverseGeoAbortController.abort();
+      }
+
+      reverseGeoAbortController = new AbortController();
+
+      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&zoom=18&addressdetails=1`;
+
+      const response = await fetch(url, {
+        signal: reverseGeoAbortController.signal,
+        headers: {
+          "Accept": "application/json"
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error("Reverse geocoding request failed");
+      }
+
+      const data = await response.json();
+
+      if (data && data.display_name) {
+        address.value = data.display_name;
+      }
+
+      if (data && data.address) {
+        const extractedDistrict = extractDistrictFromAddress(data.address);
+        if (extractedDistrict) {
+          district.value = extractedDistrict;
+        }
+      }
+
+      showStatus("Location updated and address detected.", "success");
+    } catch (err) {
+      if (err.name === "AbortError") return;
+      console.error("Reverse geocoding error:", err);
+      showStatus("Location set, but address lookup failed.", "info");
+    }
+  }
+
+  function debounceReverseGeocode() {
+    clearTimeout(reverseGeoTimeout);
+    reverseGeoTimeout = setTimeout(() => {
+      const lat = Number(homeLatitude.value);
+      const lng = Number(homeLongitude.value);
+
+      if (!isNaN(lat) && !isNaN(lng)) {
+        moveMarker(lat, lng, false);
+        reverseGeocode(lat, lng);
+      }
+    }, 500);
+  }
+
   btnGetLocation.addEventListener("click", () => {
     if (!navigator.geolocation) {
       showStatus("Geolocation is not supported in this browser.", "error");
@@ -345,9 +509,14 @@
     }
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        homeLatitude.value = position.coords.latitude;
-        homeLongitude.value = position.coords.longitude;
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+
+        setLatLngFields(lat, lng);
+        moveMarker(lat, lng, true);
+        await reverseGeocode(lat, lng);
+
         showStatus("Location fetched successfully.", "success");
       },
       (error) => {
@@ -357,12 +526,22 @@
     );
   });
 
+  homeLatitude.addEventListener("input", debounceReverseGeocode);
+  homeLongitude.addEventListener("input", debounceReverseGeocode);
+
   btnClearForm.addEventListener("click", () => {
     [
       deviceKey, deviceLabel, ownerName, nationalId, mobileNumber,
       familyMembers, address, district, emergencyContactName,
       emergencyContactNumber, homeLatitude, homeLongitude, notes
     ].forEach(el => el.value = "");
+
+    if (mapInitialized) {
+      map.setView([7.8731, 80.7718], 7);
+      marker.setLatLng([7.8731, 80.7718]);
+      marker.bindPopup("Selected location").openPopup();
+    }
+
     updatePreview();
     showStatus("Form cleared.", "info");
   });
@@ -424,79 +603,78 @@
   });
 
   btnSaveRegistration.addEventListener("click", async () => {
-  const user = auth.currentUser;
-  if (!user) {
-    showStatus("Please log in first.", "error");
-    return;
-  }
-
-  const key = deviceKey.value.trim();
-
-  if (!key) {
-    showStatus("Device key is required.", "error");
-    return;
-  }
-
-  if (!ownerName.value.trim()) {
-    showStatus("Owner name is required.", "error");
-    return;
-  }
-
-  if (!mobileNumber.value.trim()) {
-    showStatus("Mobile number is required.", "error");
-    return;
-  }
-
-  if (!familyMembers.value.trim()) {
-    showStatus("Family members count is required.", "error");
-    return;
-  }
-
-  try {
-    const docRef = doc(db, "registered_devices", key);
-    const existingSnap = await getDoc(docRef);
-
-    // Block duplicate registration
-    if (existingSnap.exists()) {
-      showStatus("This device key is already registered and cannot be registered again.", "error");
+    const user = auth.currentUser;
+    if (!user) {
+      showStatus("Please log in first.", "error");
       return;
     }
 
-    const payload = {
-      node_key: key,
-      deviceLabel: deviceLabel.value.trim(),
-      ownerName: ownerName.value.trim(),
-      nationalId: nationalId.value.trim(),
-      mobileNumber: mobileNumber.value.trim(),
-      familyMembers: Number(familyMembers.value.trim() || 0),
-      address: address.value.trim(),
-      district: district.value.trim(),
-      emergencyContactName: emergencyContactName.value.trim(),
-      emergencyContactNumber: emergencyContactNumber.value.trim(),
-      homeLatitude: homeLatitude.value.trim() === "" ? null : Number(homeLatitude.value),
-      homeLongitude: homeLongitude.value.trim() === "" ? null : Number(homeLongitude.value),
-      notes: notes.value.trim(),
-      isActive: true,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-      registeredByUid: user.uid,
-      registeredByEmail: user.email || ""
-    };
+    const key = deviceKey.value.trim();
 
-    await setDoc(docRef, payload);
+    if (!key) {
+      showStatus("Device key is required.", "error");
+      return;
+    }
 
-    document.getElementById("modalShowKey").textContent = key;
-    document.getElementById("modalShowName").textContent = ownerName.value.trim();
-    document.getElementById("modalShowMobile").textContent = mobileNumber.value.trim();
+    if (!ownerName.value.trim()) {
+      showStatus("Owner name is required.", "error");
+      return;
+    }
 
-    const successModal = new bootstrap.Modal(document.getElementById("successModal"));
-    successModal.show();
+    if (!mobileNumber.value.trim()) {
+      showStatus("Mobile number is required.", "error");
+      return;
+    }
 
-    showStatus("Device registration saved successfully.", "success");
-  } catch (err) {
-    showStatus(`Saving registration failed: ${err.message}`, "error");
-  }
-});
+    if (!familyMembers.value.trim()) {
+      showStatus("Family members count is required.", "error");
+      return;
+    }
+
+    try {
+      const docRef = doc(db, "registered_devices", key);
+      const existingSnap = await getDoc(docRef);
+
+      if (existingSnap.exists()) {
+        showStatus("This device key is already registered and cannot be registered again.", "error");
+        return;
+      }
+
+      const payload = {
+        node_key: key,
+        deviceLabel: deviceLabel.value.trim(),
+        ownerName: ownerName.value.trim(),
+        nationalId: nationalId.value.trim(),
+        mobileNumber: mobileNumber.value.trim(),
+        familyMembers: Number(familyMembers.value.trim() || 0),
+        address: address.value.trim(),
+        district: district.value.trim(),
+        emergencyContactName: emergencyContactName.value.trim(),
+        emergencyContactNumber: emergencyContactNumber.value.trim(),
+        homeLatitude: homeLatitude.value.trim() === "" ? null : Number(homeLatitude.value),
+        homeLongitude: homeLongitude.value.trim() === "" ? null : Number(homeLongitude.value),
+        notes: notes.value.trim(),
+        isActive: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        registeredByUid: user.uid,
+        registeredByEmail: user.email || ""
+      };
+
+      await setDoc(docRef, payload);
+
+      document.getElementById("modalShowKey").textContent = key;
+      document.getElementById("modalShowName").textContent = ownerName.value.trim();
+      document.getElementById("modalShowMobile").textContent = mobileNumber.value.trim();
+
+      const successModal = new bootstrap.Modal(document.getElementById("successModal"));
+      successModal.show();
+
+      showStatus("Device registration saved successfully.", "success");
+    } catch (err) {
+      showStatus(`Saving registration failed: ${err.message}`, "error");
+    }
+  });
 
   btnRegisterAnother.addEventListener("click", () => {
     [
@@ -505,10 +683,17 @@
       emergencyContactNumber, homeLatitude, homeLongitude, notes
     ].forEach(el => el.value = "");
 
+    if (mapInitialized) {
+      map.setView([7.8731, 80.7718], 7);
+      marker.setLatLng([7.8731, 80.7718]);
+      marker.bindPopup("Selected location").openPopup();
+    }
+
     updatePreview();
     showStatus("You can register another device now.", "info");
   });
 
+  initMap();
   updatePreview();
 </script>
 
